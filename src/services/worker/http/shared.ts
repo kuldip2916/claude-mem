@@ -27,6 +27,7 @@ import { isInsideDeliverablesDir, resolveDeliverablesDir } from '../../../shared
 import { isPrivatePrompt } from '../../../shared/deliverables-transcript.js';
 import { statSync } from 'fs';
 import { isExpiredObserverEvent } from '../../../shared/observer-work-policy.js';
+import { ObserverEventLedger } from '../../sqlite/ObserverEventLedger.js';
 
 export interface IngestContext {
   sessionManager: SessionManager;
@@ -365,9 +366,11 @@ export async function ingestObservation(payload: ObservationPayload, handoff: In
   // Best-effort by construction: an observation must still be generated if the
   // backup index write fails, so a throw here is logged and swallowed. Rows
   // without a tool_use_id are skipped by upsertToolUse (nothing to de-dupe on).
+  // The tool_uses row id doubles as the event's durable observer id (ledger).
+  let eventId: number | undefined;
   if (payload.toolUseId) {
     try {
-      store.upsertToolUse({
+      eventId = store.upsertToolUse({
         toolUseId: payload.toolUseId,
         contentSessionId: payload.contentSessionId,
         sessionDbId,
@@ -382,7 +385,7 @@ export async function ingestObservation(payload: ObservationPayload, handoff: In
         agentId: typeof payload.agentId === 'string' ? payload.agentId : null,
         orGenerationId: typeof payload.orGenerationId === 'string' ? payload.orGenerationId : null,
         orSessionId: typeof payload.orSessionId === 'string' ? payload.orSessionId : null,
-      });
+      }) ?? undefined;
     } catch (error) {
       // A concurrent SQLite connection can delete the session after the
       // post-capture check. The write trigger closes that final DB race.
@@ -465,9 +468,21 @@ export async function ingestObservation(payload: ObservationPayload, handoff: In
     agentId: typeof payload.agentId === 'string' ? payload.agentId : undefined,
     agentType: typeof payload.agentType === 'string' ? payload.agentType : undefined,
     toolUseId: typeof payload.toolUseId === 'string' ? payload.toolUseId : undefined,
+    ...(eventId !== undefined ? { eventId } : {}),
     ...(media.refs.length ? { mediaRefs: media.refs, mediaEventKey: media.eventKey } : {}),
     ...(media.failures.length ? { mediaFailures: media.failures } : {}),
   }, payload.enqueuedAtEpochMs);
+  if (eventId !== undefined) {
+    // Never fatal: a ledger miss costs the audit trail, not the observation.
+    try {
+      const ledger = new ObserverEventLedger(store.db);
+      if (queuedMessageId === 0) ledger.recordRefused(eventId, sessionDbId, 'live buffer refused the event');
+      else ledger.recordQueued(eventId, sessionDbId);
+    } catch (error) {
+      logger.warn('LEDGER', 'Observer ledger write failed at ingest', { sessionId: sessionDbId, eventId },
+        error instanceof Error ? error : new Error(String(error)));
+    }
+  }
   if (queuedMessageId === 0) return { ok: true, status: 'skipped', reason: 'duplicate_or_live_buffer_limit' };
   // Enqueued: the hand-off point. Synchronously, before the generator kick.
   handoff.markHandedOff?.();

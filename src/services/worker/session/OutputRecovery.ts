@@ -32,4 +32,12 @@ export function recordRejectedOutput(session: ActiveSession): RejectedOutputDisp
 export function clearRejectedOutput(session: ActiveSession): void {
   session.consecutiveInvalidOutputs = 0;
   session.invalidOutputBatchKey = null;
+  session.rejectedOutputNote = null;
+}
+
+/** The note to append when this batch is the one being asked again. */
+export function rejectedOutputNoteFor(session: ActiveSession, firstMessageId: number): string | null {
+  return session.consecutiveInvalidOutputs === 1 && session.invalidOutputBatchKey === String(firstMessageId)
+    ? session.rejectedOutputNote ?? null
+    : null;
 }

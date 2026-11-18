@@ -430,6 +430,7 @@ export class WorkerService implements WorkerRef {
       this.sessionManager,
       this.sessionEventBroadcaster,
       this.dbManager,
+      (prompt, context) => this.sdkAgent.runObserverBackfillPrompt(prompt, context),
     );
     this.corpusStore = new CorpusStore();
 

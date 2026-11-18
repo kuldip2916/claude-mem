@@ -342,6 +342,7 @@ export interface SettingsDefaults {
   CLAUDE_MEM_MAX_CONCURRENT_AGENTS: string;  
   CLAUDE_MEM_OBSERVER_MAX_CONVERSATION_CHARS: string;
   CLAUDE_MEM_OBSERVER_THINKING: string;  // Observer thinking param: 'disabled' | 'adaptive' | 'enabled[:budget]' | 'omit' (#4732)
+  CLAUDE_MEM_OBSERVER_STRICT_FIELDS: string;  // 'true': every observation field required (type, title, subtitle, facts, narrative, concepts); default keeps the title-only rule
   CLAUDE_MEM_OBSERVER_CONTEXT_WINDOW: string;  // Observer model context window in tokens; '' = resolve automatically
   CLAUDE_MEM_OBSERVER_MAX_OUTPUT_TOKENS: string;  // Output-token cap on every HTTP observer request (OpenRouter, custom, gateway, Gemini)
   CLAUDE_MEM_OBSERVE_BARE_PROMPTS: string;  // 'true' sends a user prompt to the observer on its own; default 'false' carries it on the next tool event
@@ -673,6 +674,7 @@ export class SettingsDefaultsManager {
     // move once (CHANGED_SHIPPED_DEFAULTS).
     CLAUDE_MEM_OBSERVER_MAX_CONVERSATION_CHARS: '100000',
     CLAUDE_MEM_OBSERVER_THINKING: 'disabled',  // Observer thinking param: 'disabled' (shipped) | 'adaptive' | 'enabled[:budget]' | 'omit' — an always-thinking gateway upstream rejects 'disabled' with 400/1210 (#4732)
+    CLAUDE_MEM_OBSERVER_STRICT_FIELDS: 'false',  // 'true' requires every observation field and the mode's types and concepts; an incomplete reply is retried once with the violations, then left to the post-session audit
     CLAUDE_MEM_OBSERVER_CONTEXT_WINDOW: '',  // Observer model context window in tokens; '' = resolve it (OpenRouter catalogue, Gemini/Claude maps). Lowers the budget above to half the window (#3625)
     CLAUDE_MEM_OBSERVER_MAX_OUTPUT_TOKENS: '4096',  // max_tokens / max_completion_tokens / Gemini maxOutputTokens on every HTTP observer request (#3868)
     CLAUDE_MEM_OBSERVE_BARE_PROMPTS: 'false',  // 'true' restores one observer call per user prompt; 'false' carries the prompt on the next tool event's call

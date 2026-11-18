@@ -40,6 +40,7 @@ export type Component =
   | 'HTTP'
   | 'IMPORT'
   | 'INGEST'
+  | 'LEDGER'
   | 'NOTION'
   | 'OAUTH'
   | 'OMP'

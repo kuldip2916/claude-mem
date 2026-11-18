@@ -509,6 +509,7 @@ export class SessionManager {
       agentId: data.agentId,
       agentType: data.agentType,
       toolUseId: data.toolUseId,
+      ...(data.eventId !== undefined ? { eventId: data.eventId } : {}),
       // Bounded side references only; tool_input/tool_response stay text and
       // the durable identity lives in media_events, never this RAM buffer ID.
       ...(data.mediaRefs ? { mediaRefs: data.mediaRefs, mediaEventKey: data.mediaEventKey } : {}),

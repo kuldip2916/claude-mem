@@ -45,6 +45,7 @@ import {
 } from '../../shared/observer-recycle.js';
 import { resolveContextWindowTokens, observationFieldMaxChars } from './context-window.js';
 import { recycleObserverConversation, loadSessionStartContext, openObserverGeneration, observesBarePrompts } from './session/recycle-conversation.js';
+import { rejectedOutputNoteFor } from './session/OutputRecovery.js';
 import { MAX_CONSECUTIVE_SDK_STREAM_EXITS, RESPONSE_STALL_MS, ObserverResponsePacer } from './session/response-pacer.js';
 import { recordObserverFailure } from '../../shared/observer-health.js';
 import type { ClaudeCredential } from '../../shared/quota-cooldown.js';
@@ -416,6 +417,16 @@ export class ClaudeProvider {
     const activeResponseContext = { current: snapshotResponseContext(session) };
     const compressField: FieldCompressor = (text, budgetChars, signal) =>
       this.compressField(text, budgetChars, session, modelId, claudePath, signal);
+    // A reply the output contract rejects is retried once, by a fresh agent,
+    // with the violations included (ResponseProcessor.enforceObservationContract).
+    session.observerRepair = (prompt) => this.runStandaloneObserverPrompt(prompt, {
+      sessionDbId: session.sessionDbId,
+      contentSessionId: session.contentSessionId,
+      project: session.project,
+      signals: [session.abortController.signal],
+      thinkingStripped: session.observerThinkingStripped,
+      standIn: session.claudeAuthOverride ?? undefined,
+    }, modelId, claudePath);
     // Paces the streaming feed to one unanswered prompt per generation (#4066).
     const pacer = new ObserverResponsePacer();
     const messageGenerator = this.createMessageGenerator(session, cwdTracker, activeResponseContext, worker, compressField, pacer);
@@ -1215,6 +1226,18 @@ export class ClaudeProvider {
     return condensed ? { text: condensed, truncated: false } : null;
   }
 
+  /**
+   * One prompt through a fresh observer agent, for the post-session audit's
+   * backfill of unobserved events (observer-audit.ts).
+   */
+  async runObserverBackfillPrompt(
+    prompt: string,
+    context: { sessionDbId: number; contentSessionId: string; project: string },
+  ): Promise<string | null> {
+    const claudePath = await findClaudeExecutable('SDK');
+    return this.runStandaloneObserverPrompt(prompt, context, this.getModelId(), claudePath);
+  }
+
   /** Format a stored summary through the same hardened Claude SDK path as summaries. */
   async formatTelegramWrapup(
     input: TelegramWrapupFormatterInput,
@@ -1373,14 +1396,16 @@ export class ClaudeProvider {
         if (await stopIfCaptureDisabled()) return;
 
         const obsPrompt = buildObservationPrompt({
-          id: 0, // Not used in prompt
+          id: message.eventId ?? 0,
           tool_name: message.tool_name!,
           tool_input: JSON.stringify(optimized.toolInput),
           tool_output: JSON.stringify(optimized.toolOutput),
           created_at_epoch: Date.now(),
           cwd: message.cwd
         }, fieldMaxChars, takeObserverSchemaReminder(session));
-        const batchPrompt = this.withQueuedObservations(session, message, obsPrompt, fieldMaxChars);
+        const rejectedNote = rejectedOutputNoteFor(session, message._persistentId);
+        const queuedPrompt = this.withQueuedObservations(session, message, obsPrompt, fieldMaxChars);
+        const batchPrompt = rejectedNote ? `${queuedPrompt}\n\n${rejectedNote}` : queuedPrompt;
 
         session.conversationHistory.push({ role: 'user', content: batchPrompt });
 
@@ -1461,7 +1486,7 @@ export class ClaudeProvider {
         if ([candidate.tool_input, candidate.tool_response].some(field =>
           (JSON.stringify(field, null, 2) ?? '').length > fieldMaxChars)) return false;
         addition = buildObservationPrompt({
-          id: 0,
+          id: candidate.eventId ?? 0,
           tool_name: candidate.tool_name!,
           tool_input: JSON.stringify(candidate.tool_input),
           tool_output: JSON.stringify(candidate.tool_response),

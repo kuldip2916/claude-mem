@@ -42,6 +42,8 @@ import { captureOnlyLinkWrites, hasWaitingCaptureOnlyEvents, skippedTurnCaptureO
 import { deriveLineAnchors, lineAnchorsForObservation, withLineAnchors, type LineAnchor } from '../../../shared/line-anchors.js';
 import { normalizePlatformSource } from '../../../shared/platform-source.js';
 import { hasSummaryProgress } from './summary-content.js';
+import { enforceObservationContract, recordClaimedBatch, recordContractOutcome } from './observation-contract.js';
+import { buildRejectedReplyNote } from '../../../sdk/observation-validator.js';
 import type { Database } from 'bun:sqlite';
 
 type ObservationFileEvidenceMessage = Pick<PendingMessage, 'type' | 'tool_name' | 'tool_input' | 'tool_response'>;
@@ -444,6 +446,8 @@ async function confirmWithoutStorage(
   worker: WorkerRef | undefined,
 ): Promise<void> {
   session.lastSummaryStored = false;
+  // The batch was answered on purpose (a skip, or nothing worth storing).
+  recordClaimedBatch(dbManager, sessionManager, session, 'skipped', 'answered without storage');
   try {
     recordSkippedMediaEvents(dbManager, turnMediaEventKeys(context, sessionManager, session.sessionDbId), session.sessionDbId, context.promptNumber);
   } catch (error) {
@@ -893,6 +897,8 @@ export async function processAgentResponse(
     // batch, and is confirmed as before.
     const answersQueuedWork = session.lastGeneratorSource !== 'init' && session.claimedMessageIds.length > 0;
     if (answersQueuedWork && recordRejectedOutput(session) === 'retry') {
+      // The retry carries the reason this reply was rejected.
+      session.rejectedOutputNote = buildRejectedReplyNote(outputClass, preview);
       logger.warn('PARSER', `${agentName} returned non-XML ${outputClass} response — asking for the queued batch again in a fresh generation`, {
         sessionId: session.sessionDbId,
         outputClass,
@@ -949,6 +955,7 @@ export async function processAgentResponse(
         ...replyDiagnostics,
       });
       recordObserverFailure(providerName, `The observer answered a queued batch twice without observation XML (${outputClass}); the batch was dropped`);
+      recordClaimedBatch(dbManager, sessionManager, session, 'dropped', `rejected twice without observation XML (${outputClass})`);
       recordSkippedMediaEvents(dbManager, turnMediaEventKeys(context, sessionManager, session.sessionDbId), session.sessionDbId, context.promptNumber);
     } else {
       logger.warn('PARSER', `${agentName} returned non-XML ${outputClass} response to a prompt with no queued batch`, {
@@ -1035,7 +1042,11 @@ export async function processAgentResponse(
     return null;
   }
 
-  const { observations, summary } = parsed;
+  // Strict output contract: keep only valid observations, check every event of
+  // the batch is observed or skipped, and retry once with the violations.
+  const contract = await enforceObservationContract(text, session, sessionManager, agentName);
+  const { summary } = parsed;
+  const observations = contract ? contract.observations : parsed.observations;
   const claimedMessages = sessionManager.getClaimedMessages(session.sessionDbId);
   const claimedToolUseIds = Array.from(new Set(
     claimedMessages
@@ -1086,6 +1097,10 @@ export async function processAgentResponse(
     .map((obs, index) => ({ obs, requestLabels: attachmentLinkage?.observations[index]?.refs ?? [] }))
     .filter(entry => hasStorableTitle(entry.obs.title));
   const storableObservations = storableEntries.map(entry => entry.obs);
+  // Event ids of each stored observation, aligned with storage's id order.
+  const storedEventIds = contract
+    ? sanitizedObservations.flatMap((obs, index) => hasStorableTitle(obs.title) ? [contract.eventIds[index] ?? []] : [])
+    : null;
   if (storableObservations.length < sanitizedObservations.length) {
     logger.debug('DB', 'Dropped observations without a title before storage', {
       sessionId: session.sessionDbId,
@@ -1186,6 +1201,9 @@ export async function processAgentResponse(
   // Storage is the irreversible step: confirm the batch at once, before the
   // telemetry and integration side effects below, so an exception in any of
   // them cannot replay an already-stored batch as duplicate observations.
+  if (contract && storedEventIds) {
+    recordContractOutcome(dbManager, session, { ...contract, eventIds: storedEventIds }, result.observationIds, agentName);
+  }
   await sessionManager.confirmClaimedMessages(session.sessionDbId);
   session.earliestPendingTimestamp = null;
   worker?.broadcastProcessingStatus?.();
