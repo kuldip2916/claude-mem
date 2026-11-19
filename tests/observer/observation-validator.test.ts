@@ -95,6 +95,15 @@ describe('validateObserverResponse', () => {
     expect(codes(obs({ narrative: '<narrative>a && b</narrative>' }), lenient)).toEqual(['MALFORMED_XML']);
   });
 
+  it('ignores event_ids entirely when the batch carried no ids (a host without tool_use_id)', () => {
+    const noIds: ValidationContext = { ...ctx, knownEventIds: new Set(), requireEventIds: false };
+    // Invented ids and an empty list are not violations: there was nothing to cite.
+    expect(codes(obs({ event_ids: '<event_ids><event_id>evt_3</event_id></event_ids>' }), noIds)).toEqual([]);
+    expect(codes(obs({ event_ids: '<event_ids></event_ids>' }), noIds)).toEqual([]);
+    expect(codes(obs({ event_ids: '<event_ids></event_ids>' }), { ...noIds, strictFields: false })).toEqual([]);
+    expect(validateObserverResponse(obs({ event_ids: '<event_ids><event_id>evt_3</event_id></event_ids>' }), noIds).observations[0].eventIds).toEqual([]);
+  });
+
   it('keeps attachments as a list field', () => {
     const result = validateObserverResponse(obs({ files: '<attachments><attachment>image-1</attachment></attachments>' }), ctx);
     expect(result.ok).toBe(true);

@@ -490,9 +490,12 @@ function validateObservationElement(
     !(v.code === 'MISSING_FIELD' && absent.some(name => v.message.startsWith(`<${name}>`)))));
 
   const eventIds: number[] = [];
-  if (fields.has('event_ids')) {
+  // A batch whose events carried no ids (a host without tool_use_id) has
+  // nothing to cite: models still write <event_ids>, invented or empty, and
+  // rejecting those would throw away observations no ledger can recover.
+  if (fields.has('event_ids') && ctx.knownEventIds.size > 0) {
     const rawIds = list('event_ids');
-    if (rawIds.length === 0) {
+    if (rawIds.length === 0 && ctx.strictFields) {
       violations.push({ code: 'MISSING_EVENT_IDS', message: `<event_ids> is empty (observation #${index + 1})`, blockIndex: index });
     }
     for (const raw of rawIds) {
