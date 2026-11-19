@@ -50,9 +50,19 @@ function citedEventIds(text: string): number[] {
   return [...ids];
 }
 
-function toParsed(obs: ValidatedObservation): ParsedObservation {
+/**
+ * The parser's shape: a missing text field is null, never ''. Storage hashes
+ * title and narrative to merge a repeated observation into its existing row,
+ * so '' would store a duplicate instead of merging.
+ */
+export function toParsed(obs: ValidatedObservation): ParsedObservation {
   const { eventIds: _eventIds, ...fields } = obs;
-  return fields;
+  return {
+    ...fields,
+    title: fields.title || null,
+    subtitle: fields.subtitle || null,
+    narrative: fields.narrative || null,
+  };
 }
 
 function batchEventPrompt(message: PendingMessageWithId, fieldMaxChars: number): string {

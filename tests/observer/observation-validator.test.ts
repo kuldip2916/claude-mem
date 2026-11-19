@@ -9,6 +9,7 @@ import {
   type ValidationContext,
 } from '../../src/sdk/observation-validator.js';
 import { buildObservationPrompt } from '../../src/sdk/prompts.js';
+import { toParsed } from '../../src/services/worker/agents/observation-contract.js';
 
 const mode = JSON.parse(readFileSync(join(import.meta.dir, '../../plugin/modes/code.json'), 'utf8'));
 const ctx: ValidationContext = {
@@ -185,5 +186,17 @@ describe('observation prompt', () => {
   it('renders no event id for an event without one', () => {
     const prompt = buildObservationPrompt({ id: 0, tool_name: 'Bash', tool_input: '{}', tool_output: '{}', created_at_epoch: 0 });
     expect(prompt).not.toContain('<event_id>');
+  });
+});
+
+describe('stored shape', () => {
+  it('matches the parser: missing text fields are null, so storage still merges repeats', () => {
+    const lenient: ValidationContext = { ...ctx, strictFields: false, knownEventIds: new Set(), requireEventIds: false };
+    const [o] = validateObserverResponse('<observation><type>discovery</type><title>Viewport</title></observation>', lenient).observations;
+    const parsed = toParsed(o);
+    expect(parsed.narrative).toBeNull();
+    expect(parsed.subtitle).toBeNull();
+    expect(parsed.title).toBe('Viewport');
+    expect('eventIds' in parsed).toBe(false);
   });
 });
