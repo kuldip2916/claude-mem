@@ -153,6 +153,23 @@ export class ObserverEventLedger {
     `).all(sessionDbId) as LedgerEvent[];
   }
 
+  /**
+   * Completed sessions that still have queued or dropped events created at or
+   * after `sinceEpoch`: their post-session audit did not finish.
+   */
+  listCompletedSessionsWithUnaccounted(sinceEpoch: number): number[] {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT l.session_db_id AS id
+        FROM observer_event_ledger l
+        JOIN sdk_sessions s ON s.id = l.session_db_id
+       WHERE s.status = 'completed'
+         AND l.status IN ('queued', 'dropped')
+         AND l.created_at_epoch >= ?
+       ORDER BY l.session_db_id
+    `).all(sinceEpoch) as Array<{ id: number }>;
+    return rows.map(row => row.id);
+  }
+
   summarize(sessionDbId: number): LedgerSummary {
     const rows = this.db.prepare(`
       SELECT status, COUNT(*) AS n FROM observer_event_ledger WHERE session_db_id = ? GROUP BY status

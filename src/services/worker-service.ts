@@ -1364,6 +1364,11 @@ export class WorkerService implements WorkerRef {
       // Optional raw-tool indexing yields between committed batches. Start only
       // after core routes are usable; shutdown preserves the committed cursor.
       void this.dbManager.initializeToolUseSearch();
+      // Post-session audits that the previous worker's shutdown cut off.
+      // Background and one session at a time; never fails startup.
+      void this.completionHandler.resumeInterruptedAudits().catch(error => {
+        logger.warn('LEDGER', 'Resuming interrupted audits failed', {}, error instanceof Error ? error : new Error(String(error)));
+      });
       this.resolveAutoUpdateFailuresNowThatThisWorkerIsReady();
 
       // Lifecycle telemetry. Profile-less: a person on this id would make every
