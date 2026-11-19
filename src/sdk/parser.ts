@@ -66,6 +66,7 @@ export type ParseResult =
 const OBSERVATION_SCHEMA_TAGS = new Set([
   'type', 'title', 'subtitle', 'narrative', 'facts', 'fact', 'concepts', 'concept',
   'files_read', 'files_modified', 'file', 'attachments', 'attachment',
+  'event_ids', 'event_id',
 ]);
 
 // XML 1.0 S allows only space, tab, CR and LF before a tag's closing `>`.

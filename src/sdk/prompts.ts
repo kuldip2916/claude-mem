@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 import { REDACTION_MARKER_HINT, hasRedactionMarker } from '../utils/redaction.js';
 import type { ModeConfig } from '../services/domain/types.js';
 import type { RequiredPromptKey } from '../services/domain/mode-validation.js';
+import { OUTPUT_CONTRACT, formatEventId } from './observation-validator.js';
 import {
   anthropicImageSourceOf,
   claudeReadImageFileOf,
@@ -74,8 +75,13 @@ function observationSkeleton(mode: ModeConfig): string {
     <file>${getPrompt(mode, 'xml_file_placeholder')}</file>
     <file>${getPrompt(mode, 'xml_file_placeholder')}</file>
   </files_modified>
+  <event_ids>
+    <event_id>[evt_N: the <event_id> of each tool event this observation covers]</event_id>
+  </event_ids>
 </observation>
 ${getPrompt(mode, 'format_examples')}
+
+${OUTPUT_CONTRACT}
 
 ${getPrompt(mode, 'footer')}`;
 }
@@ -413,6 +419,8 @@ export function buildObservationPrompt(
  */
 export interface ObservationPromptParts {
   header: string;
+  /** Durable event id rendered in the header, when the event has one. */
+  eventId?: number;
   parameters: string;
   outcome: string;
   restateSchema: boolean;
@@ -444,8 +452,10 @@ export function buildObservationPromptParts(
     toolOutput = obs.tool_output;
   }
 
+  const eventId = obs.id > 0 ? obs.id : undefined;
   return {
-    header: `<observed_from_primary_session>
+    eventId,
+    header: `<observed_from_primary_session>${eventId !== undefined ? `\n  <event_id>${formatEventId(eventId)}</event_id>` : ''}
   <what_happened>${obs.tool_name}</what_happened>
   <occurred_at>${new Date(obs.created_at_epoch).toISOString()}</occurred_at>${obs.cwd ? `\n  <working_directory>${obs.cwd}</working_directory>` : ''}`,
     parameters: truncateObservationField(stripImagePayloadsFromField(toolInput), fieldMaxChars),
@@ -465,14 +475,14 @@ export function renderObservationPrompt(parts: ObservationPromptParts): string {
 
 If a <parameters> or <outcome> block above contains an "<elided chars=... />" marker, that field was truncated to fit the observer's context window. Describe only what you can see in the kept portion and do not infer details about the elided range.
 ${redactionHint}
-Return either one or more <observation>...</observation> blocks, or <skip_summary reason="noise" /> if this tool use should be skipped.
+Return either one or more <observation>...</observation> blocks, or <skip_summary reason="noise" /> if this tool use should be skipped.${parts.eventId !== undefined ? ` Each <observation> lists ${formatEventId(parts.eventId)} (and any other event it covers) in <event_ids>.` : ''}
 Concrete debugging findings from logs, queue state, database rows, session routing, or code-path inspection count as durable discoveries and should be recorded.
 Never reply with an empty response, or with prose such as "Skipping", "No substantive tool executions", or any explanation outside XML. Only <observation> blocks or the <skip_summary /> sentinel complete this tool use; anything else is asked again once, then discarded.${restateSchema ? `\n${OBSERVATION_SCHEMA_REMINDER}` : ''}`;
 }
 
 /** Restated once after a reply that used tags outside the observation schema (#3461). */
 export const OBSERVATION_SCHEMA_REMINDER =
-  'Your previous reply used tags outside the observation format. Use only <type>, <title>, <subtitle>, <facts>, <narrative>, <concepts>, <files_read> and <files_modified> inside each <observation>.';
+  'Your previous reply used tags outside the observation format. Use only <type>, <title>, <subtitle>, <facts>, <narrative>, <concepts>, <files_read>, <files_modified> and <event_ids> inside each <observation>.';
 
 export function buildSummaryPrompt(session: SDKSession, mode: ModeConfig): string {
   const lastAssistantMessage = session.last_assistant_message || (() => {

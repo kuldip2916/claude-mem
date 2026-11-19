@@ -33,6 +33,7 @@ import {
   type UpsertToolUseInput,
   type ToolUseQueryFilters,
 } from './tool-uses.js';
+import { ensureObserverEventLedgerSchema } from './ObserverEventLedger.js';
 import {
   createDeliverablesSchema,
   recordDeliverable as recordDeliverableRow,
@@ -353,6 +354,8 @@ export class SessionStore {
     this.ensureNativePromptIdentity();
     this.ensureObservationFileIndex();
     ensureMediaSchema(this.db);
+    // v76: which observation recorded each queued tool event (observer ledger).
+    ensureObserverEventLedgerSchema(this.db);
   }
 
   /**

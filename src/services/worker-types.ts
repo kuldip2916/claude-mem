@@ -190,6 +190,13 @@ export interface ActiveSession {
   lastUsage?: { input: number; output: number; costUsd?: number } | null;
   /** What triggered the running generator ('init' | 'ingest' | 'summarize') — telemetry hook. */
   lastGeneratorSource?: string;
+  /**
+   * One-shot call to a FRESH observer agent, set by the provider for the
+   * generation: repairs a reply the output contract rejected (prompt in, text out).
+   */
+  observerRepair?: (prompt: string) => Promise<string | null>;
+  /** Why the batch being asked again was rejected (OutputRecovery), sent with the retry. */
+  rejectedOutputNote?: string | null;
   /** Model id resolved when the generator started — error-path telemetry, where no response model exists. */
   lastModelId?: string;
   /** Model the OBSERVED IDE session is running (from its transcript) — telemetry observed_model. Not the observer model. */
@@ -263,6 +270,8 @@ export interface PendingMessage {
   agentId?: string;
   agentType?: string;
   toolUseId?: string;
+  /** Durable event id (tool_uses.id), rendered as <event_id>evt_N</event_id>. */
+  eventId?: number;
 }
 
 export interface PendingMessageWithId extends PendingMessage {
@@ -282,6 +291,8 @@ export interface ObservationData {
   agentId?: string;
   agentType?: string;
   toolUseId?: string;
+  /** Durable event id (tool_uses.id) of this tool use, when it has one. */
+  eventId?: number;
 }
 
 export interface SSEEvent {
